@@ -48,7 +48,9 @@ func Start(args []string) error {
 	}
 
 	log.Printf("Starting prometheus-rough-proxy (listening on %s)", opts.listen)
-	http.ListenAndServe(opts.listen, h)
+	if err := http.ListenAndServe(opts.listen, h); err != nil {
+		return err
+	}
 
 	return nil
 }
