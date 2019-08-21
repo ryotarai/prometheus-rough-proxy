@@ -2,12 +2,13 @@ package handler
 
 import (
 	"encoding/json"
-	"github.com/prometheus/common/model"
-	"github.com/ryotarai/prometheus-rough-proxy/lib/client"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+
+	"github.com/prometheus/common/model"
+	"github.com/ryotarai/prometheus-rough-proxy/lib/client"
 )
 
 type handler struct {
@@ -57,7 +58,7 @@ func (h *handler) handleQueryRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.client.QueryRangeByQuery(query, start, end, step)
+	result, err := h.client.QueryRangeByQuery(r.Context(), query, start, end, step)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err, errorNone)
 		return

@@ -12,12 +12,13 @@ import (
 
 	promapi "github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"golang.org/x/sync/semaphore"
 )
 
 type Client struct {
-	prometheusURL *url.URL
-	api           promv1.API
-	concurrencyCh chan struct{}
+	prometheusURL        *url.URL
+	api                  promv1.API
+	concurrencySemaphore *semaphore.Weighted
 }
 
 func New(prometheusURL *url.URL, concurrency int) (*Client, error) {
@@ -32,13 +33,13 @@ func New(prometheusURL *url.URL, concurrency int) (*Client, error) {
 	api := promv1.NewAPI(client)
 
 	return &Client{
-		prometheusURL: prometheusURL,
-		api:           api,
-		concurrencyCh: make(chan struct{}, concurrency),
+		prometheusURL:        prometheusURL,
+		api:                  api,
+		concurrencySemaphore: semaphore.NewWeighted(int64(concurrency)),
 	}, nil
 }
 
-func (c *Client) QueryRangeByQuery(query string, start time.Time, end time.Time, step time.Duration) (model.Matrix, error) {
+func (c *Client) QueryRangeByQuery(ctx context.Context, query string, start time.Time, end time.Time, step time.Duration) (model.Matrix, error) {
 	type respT struct {
 		value    model.Value
 		warnings promapi.Warnings
@@ -51,9 +52,12 @@ func (c *Client) QueryRangeByQuery(query string, start time.Time, end time.Time,
 	for !t.Before(start) {
 		u := t
 		go func() {
-			c.concurrencyCh <- struct{}{}
+			err := c.concurrencySemaphore.Acquire(ctx, 1)
+			if err != nil {
+				return
+			}
 			defer func() {
-				<-c.concurrencyCh
+				c.concurrencySemaphore.Release(1)
 			}()
 
 			log.Printf("DEBUG: Querying to upstream (t: %s, query: '%v')", u, query)
@@ -67,7 +71,12 @@ func (c *Client) QueryRangeByQuery(query string, start time.Time, end time.Time,
 
 	resps := make([]respT, count)
 	for i := 0; i < count; i++ {
-		resps[i] = <-respCh
+		select {
+		case r := <-respCh:
+			resps[i] = r
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	metrics := map[string]model.Metric{}
